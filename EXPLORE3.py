@@ -1,13 +1,12 @@
-# --- Updated Streamlit App with Adaptive Cluster Count and Enhanced DNN-EQIC Interpretation ---
+# hybrid_dnn_eqic_streamlit.py
 import streamlit as st
 import pandas as pd
 import numpy as np
-import seaborn as sns
-import matplotlib.pyplot as plt
 from sklearn.preprocessing import MinMaxScaler
-from sklearn.metrics import silhouette_score, calinski_harabasz_score, davies_bouldin_score
+from sklearn.metrics import silhouette_score, accuracy_score, calinski_harabasz_score, davies_bouldin_score
 from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
+import matplotlib.pyplot as plt
 from itertools import product
 import warnings
 warnings.filterwarnings("ignore")
@@ -116,136 +115,145 @@ def enhanced_quantum_clustering(data, n_clusters=2, alpha=2.0, beta=0.5, gamma=0
     labels = assign_clusters(data, centroids, weights, alpha, beta, gamma)
     return labels, centroids, weights
 
-def hyperparameter_search(data, cluster_range, param_grid):
+def hyperparameter_search(data, n_clusters, param_grid):
     best_score = -np.inf
     best_params = None
     best_labels = None
-    best_n_clusters = None
-    for n_clusters in cluster_range:
-        for alpha, beta, gamma, kappa in product(param_grid['alpha'], param_grid['beta'], param_grid['gamma'], param_grid['kappa']):
-            labels, _, _ = enhanced_quantum_clustering(
-                data, n_clusters=n_clusters, alpha=alpha, beta=beta, gamma=gamma, kappa=kappa
-            )
-            try:
-                score = silhouette_score(data, labels)
-            except:
-                score = -1
-            if score > best_score:
-                best_score = score
-                best_params = {'alpha': alpha, 'beta': beta, 'gamma': gamma, 'kappa': kappa}
-                best_labels = labels
-                best_n_clusters = n_clusters
-    return best_labels, best_params, best_score, best_n_clusters
-
-def interpret_clusters(df, features):
-    interpretations = []
-    stats = df.groupby('Cluster')[features].agg(['mean', 'std'])
-    for cluster_id in sorted(df['Cluster'].unique()):
-        desc = f"\n**Cluster {cluster_id} Summary:**\n"
-        cluster_stats = stats.loc[cluster_id]
-        top_mean = cluster_stats['mean'].sort_values(ascending=False).head(3)
-        low_mean = cluster_stats['mean'].sort_values().head(3)
-
-        desc += f"- High Feature Means: {', '.join(top_mean.index)}\n"
-        desc += f"- Low Feature Means: {', '.join(low_mean.index)}\n"
-
-        corrs = df[df['Cluster'] == cluster_id][features].corr()
-        strong_corr = ((corrs > 0.8) | (corrs < -0.8)) & (corrs != 1.0)
-        high_corr_pairs = [(i, j) for i in corrs.columns for j in corrs.columns if strong_corr.loc[i, j]]
-        if high_corr_pairs:
-            desc += f"- Strong Correlations: {', '.join([f'{a}<->{b}' for a,b in high_corr_pairs])}\n"
-        else:
-            desc += "- No strong intra-cluster correlations found.\n"
-
-        interpretations.append(desc)
-    return "\n".join(interpretations)
+    for alpha, beta, gamma, kappa in product(param_grid['alpha'], param_grid['beta'], param_grid['gamma'], param_grid['kappa']):
+        labels, _, _ = enhanced_quantum_clustering(
+            data, n_clusters=n_clusters, alpha=alpha, beta=beta, gamma=gamma, kappa=kappa
+        )
+        try:
+            score = silhouette_score(data, labels)
+        except:
+            score = -1
+        if score > best_score:
+            best_score = score
+            best_params = {'alpha': alpha, 'beta': beta, 'gamma': gamma, 'kappa': kappa}
+            best_labels = labels
+    return best_labels, best_params, best_score
 
 # -------------------- Streamlit UI --------------------
-st.set_page_config(page_title="\U0001f9d0 Hybrid DNN-EQIC Clustering", layout="wide")
-st.title(":brain: Hybrid DNN-EQIC Clustering with Interpretation")
+st.set_page_config(page_title="Hybrid DNN-EQIC Clustering", layout="wide")
+st.title("🧐 Hybrid DNN-EQIC Clustering + Adaptive Forecasting")
 
-uploaded_file = st.file_uploader("\U0001f4c4 Upload your dataset (CSV/XLSX)", type=["csv", "xlsx"])
+uploaded_file = st.file_uploader("📄 Upload your training dataset (CSV/XLSX)", type=["csv", "xlsx"])
 
 if uploaded_file:
     df = pd.read_csv(uploaded_file) if uploaded_file.name.endswith(".csv") else pd.read_excel(uploaded_file)
     df.columns = df.columns.astype(str)
     st.dataframe(df.head())
 
+    st.markdown("### 🎯 Clustering Setup")
     target_column = st.selectbox("Select target column (optional)", ["None"] + list(df.columns))
     target_column = None if target_column == "None" else target_column
-    auto_cluster = st.checkbox("Automatically determine optimal number of clusters", value=True)
-    if not auto_cluster:
-        n_clusters = st.slider("Manual number of clusters", 2, 10, 3)
+    n_clusters = st.slider("Number of clusters", 2, 10, 3)
 
-    if st.button("\U0001f680 Start Clustering"):
-        df_clean = preprocess_df(df, target_column)
+    if st.button("🚀 Start Clustering"):
+        try:
+            df_clean = preprocess_df(df, target_column)
+        except ValueError as e:
+            st.error(f"🚫 {str(e)}")
+            st.stop()
+
         features = [col for col in df_clean.columns if col != target_column]
         scaler = MinMaxScaler()
         X_scaled = scaler.fit_transform(df_clean[features])
 
+        st.info("🔍 Hyperparameter tuning in progress...")
         param_grid = {'alpha': [1.0, 2.0], 'beta': [0.3, 0.5], 'gamma': [0.7, 0.9], 'kappa': [0.05, 0.1]}
-        if auto_cluster:
-            cluster_range = range(2, 8)
-        else:
-            cluster_range = [n_clusters]
-
-        labels, best_params, sil_score, best_n_clusters = hyperparameter_search(X_scaled, cluster_range, param_grid)
-
-        st.success(f"\u2705 Best Silhouette Score: {sil_score:.4f} with {best_n_clusters} clusters")
+        _, best_params, sil_score = hyperparameter_search(X_scaled, n_clusters, param_grid)
+        st.success(f"✅ Silhouette Score: {sil_score:.4f}")
         st.json(best_params)
 
-        labels, centroids, weights = enhanced_quantum_clustering(X_scaled, best_n_clusters, **best_params)
+        labels, centroids, weights = enhanced_quantum_clustering(X_scaled, n_clusters, **best_params)
         df_clean['Cluster'] = labels
 
-        st.markdown("### \U0001f4ca Cluster Metrics")
+        st.markdown("### 📊 Clustering Metrics")
         st.write(f"Calinski-Harabasz Score: {calinski_harabasz_score(X_scaled, labels):.2f}")
         st.write(f"Davies-Bouldin Score: {davies_bouldin_score(X_scaled, labels):.2f}")
 
-        st.markdown("### \U0001f4ca Cluster Sizes")
-        st.write(df_clean['Cluster'].value_counts().reset_index().rename(columns={'index': 'Cluster', 'Cluster': 'Count'}))
+        if target_column:
+            if pd.api.types.is_numeric_dtype(df_clean[target_column]):
+                cluster_map = df_clean.groupby('Cluster')[target_column].mean().to_dict()
+                intra_error = df_clean.groupby('Cluster').apply(lambda x: (x[target_column] - x[target_column].mean()).mean()).to_dict()
+            else:
+                cluster_map = df_clean.groupby('Cluster')[target_column].agg(lambda x: x.mode().iloc[0]).to_dict()
+                intra_error = {k: 0 for k in cluster_map.keys()}
 
-        st.markdown("### \U0001f9e0 Cluster Feature Statistics")
-        st.write(df_clean.groupby('Cluster')[features].agg(['mean', 'std', 'min', 'max']))
+            df_clean['Predicted'] = df_clean['Cluster'].map(cluster_map)
+            df_clean['Predicted'] += df_clean['Cluster'].map(intra_error)
 
-        st.markdown("### \U0001f52c Centroid Feature Analysis")
-        centroids_df = pd.DataFrame(scaler.inverse_transform(centroids), columns=features)
-        st.dataframe(centroids_df)
+            if pd.api.types.is_numeric_dtype(df_clean[target_column]):
+                st.metric("Cluster Forecast MAE", f"{np.mean(np.abs(df_clean[target_column] - df_clean['Predicted'])):.4f}")
+            else:
+                acc = accuracy_score(df_clean[target_column], df_clean['Predicted'])
+                st.metric("Cluster Match Accuracy", f"{acc:.2%}")
 
-        st.markdown("### \U0001f9ea Correlation Heatmaps (Per Cluster)")
-        for cluster in sorted(df_clean['Cluster'].unique()):
-            st.markdown(f"#### Cluster {cluster}")
-            corr = df_clean[df_clean['Cluster'] == cluster][features].corr()
+        st.markdown("### 📌 PCA / t-SNE Visualization")
+        tab1, tab2 = st.tabs(["PCA", "t-SNE"])
+
+        with tab1:
+            pca = PCA(n_components=2)
+            proj = pca.fit_transform(X_scaled)
             fig, ax = plt.subplots()
-            sns.heatmap(corr, cmap='coolwarm', center=0, annot=False, ax=ax)
+            for c in np.unique(labels):
+                ax.scatter(proj[labels == c, 0], proj[labels == c, 1], label=f"Cluster {c}", alpha=0.6)
+            ax.set_title("PCA Cluster Projection")
+            ax.legend()
             st.pyplot(fig)
 
-        st.markdown("### \U0001f4c8 Dimensionality Reduction")
-        pca = PCA(n_components=2).fit_transform(X_scaled)
-        tsne = TSNE(n_components=2, perplexity=30).fit_transform(X_scaled)
+        with tab2:
+            tsne = TSNE(n_components=2, perplexity=30, n_iter=500)
+            tsne_proj = tsne.fit_transform(X_scaled)
+            fig, ax = plt.subplots()
+            for c in np.unique(labels):
+                ax.scatter(tsne_proj[labels == c, 0], tsne_proj[labels == c, 1], label=f"Cluster {c}", alpha=0.6)
+            ax.set_title("t-SNE Cluster Projection")
+            ax.legend()
+            st.pyplot(fig)
 
-        fig1, ax1 = plt.subplots()
-        for c in np.unique(labels):
-            ax1.scatter(pca[labels == c, 0], pca[labels == c, 1], label=f"Cluster {c}")
-        ax1.set_title("PCA Projection")
-        ax1.legend()
-        st.pyplot(fig1)
+        st.markdown("### 🔍 Cluster Centroids")
+        centroids_df = pd.DataFrame(centroids, columns=features)
+        for col in centroids_df.columns:
+            if centroids_df[col].dtype == 'object':
+                centroids_df[col] = centroids_df[col].astype(str)
+        st.dataframe(centroids_df)
 
-        fig2, ax2 = plt.subplots()
-        for c in np.unique(labels):
-            ax2.scatter(tsne[labels == c, 0], tsne[labels == c, 1], label=f"Cluster {c}")
-        ax2.set_title("t-SNE Projection")
-        ax2.legend()
-        st.pyplot(fig2)
+        # Fix for pyarrow serialization
+        df_display = df_clean.copy()
+        for col in df_display.columns:
+            if df_display[col].dtype == 'object':
+                df_display[col] = df_display[col].astype(str)
 
-        if len(features) <= 10:
-            st.markdown("### \U0001f4c9 Pairwise Feature Distributions")
-            plot_df = df_clean[features + ['Cluster']]
-            pair_fig = sns.pairplot(plot_df, hue='Cluster', palette='tab10')
-            st.pyplot(pair_fig)
+        csv = df_display.to_csv(index=False, encoding='utf-8', errors='ignore')
+        st.download_button("📅 Download Clustered Data", csv, file_name="clustered_output.csv")
 
-        st.markdown("### \U0001fdf0 Interpretation Report")
-        interpretation_text = interpret_clusters(df_clean, features)
-        st.markdown(interpretation_text)
+        # ------------- Forecasting New Data --------------------
+        st.markdown("---")
+        st.markdown("### 📈 Predict on New Data")
+        new_file = st.file_uploader("📄 Upload new dataset for prediction (same features)", type=["csv", "xlsx"], key="new")
 
-        csv = df_clean.to_csv(index=False).encode('utf-8')
-        st.download_button("\U0001f4c5 Download Clustered Data", csv, file_name="clustered_output.csv")
+        if new_file:
+            new_df = pd.read_csv(new_file) if new_file.name.endswith(".csv") else pd.read_excel(new_file)
+            new_df.columns = new_df.columns.astype(str)
+            try:
+                new_df_clean = preprocess_df(new_df)
+                new_scaled = scaler.transform(new_df_clean[features])
+                new_labels = assign_clusters(new_scaled, centroids, weights, **best_params)
+                new_df_clean['Cluster'] = new_labels
+                new_df_clean['Predicted'] = new_df_clean['Cluster'].map(cluster_map)
+                new_df_clean['Predicted'] += new_df_clean['Cluster'].map(intra_error)
+
+                # Fix for pyarrow serialization
+                new_df_display = new_df_clean.copy()
+                for col in new_df_display.columns:
+                    if new_df_display[col].dtype == 'object':
+                        new_df_display[col] = new_df_display[col].astype(str)
+
+                st.dataframe(new_df_display.head())
+
+                forecast_csv = new_df_display.to_csv(index=False, encoding='utf-8', errors='ignore')
+                st.download_button("📅 Download Predictions", forecast_csv, file_name="forecast_output.csv")
+            except Exception as e:
+                st.error(f"Prediction Error: {str(e)}")
