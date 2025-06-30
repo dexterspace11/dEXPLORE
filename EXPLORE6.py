@@ -11,7 +11,7 @@ from sklearn.feature_selection import mutual_info_regression
 from sklearn.decomposition import PCA
 from scipy.stats import zscore
 from datetime import datetime
-import io
+import os
 
 # ---------------- Memory Structures ----------------
 class EpisodicMemory:
@@ -93,7 +93,7 @@ class HybridNeuralNetwork:
 
 # ---------------- Streamlit UI ----------------
 st.set_page_config(page_title="Unsupervised EDA with Hybrid DNN-EQIC", layout="wide")
-st.title("\U0001F50D Fully Enhanced EDA Using Cognitive Neural Pattern Discovery")
+st.title("🔍 Fully Enhanced EDA Using Cognitive Neural Pattern Discovery")
 
 uploaded_file = st.file_uploader("Upload a CSV or Excel file", type=["csv", "xlsx"])
 
@@ -169,7 +169,8 @@ if uploaded_file:
 
             st.markdown("### Mutual Information Scores (Nonlinear Relationships)")
             try:
-                mi_scores = mutual_info_regression(df_clean, df_clean.iloc[:, 0])
+                mi_data = SimpleImputer(strategy='mean').fit_transform(df_clean)
+                mi_scores = mutual_info_regression(mi_data, mi_data[:, 0])
                 mi_df = pd.DataFrame({'Feature': selected_features, 'MI Score vs ' + selected_features[0]: mi_scores})
                 st.dataframe(mi_df)
             except ValueError as e:
@@ -199,8 +200,8 @@ if uploaded_file:
                 st.bar_chart(usage_counts)
 
             st.markdown("### Export All Insights to Excel")
-            output = io.BytesIO()
-            with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+            save_path = os.path.expanduser(r"C:\\Users\\oliva\\OneDrive\\Documents\\Excel doc\\CNNanalysis.xlsx")
+            with pd.ExcelWriter(save_path) as writer:
                 df.to_excel(writer, index=False, sheet_name='Raw Data')
                 corr_matrix.to_excel(writer, sheet_name='Correlation')
                 if 'mi_df' in locals():
@@ -208,7 +209,7 @@ if uploaded_file:
                 cluster_df.to_excel(writer, sheet_name='Clusters')
                 pca_df.to_excel(writer, sheet_name='PCA')
                 outliers_df.to_excel(writer, sheet_name='Outliers')
-            st.download_button("📥 Download Full Analysis", data=output.getvalue(), file_name="EDA_Insights.xlsx")
+            st.success(f"Analysis saved to: {save_path}")
 
             st.markdown("### Interpretations")
             st.markdown("- **High Pattern Similarity** indicates recurring sequences or trends.")
