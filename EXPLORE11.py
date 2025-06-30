@@ -1,4 +1,4 @@
-# ---------------- Enhanced CNN-EQIC EDA with Dynamic Clustering, Forecasting & Anomaly Detection ----------------
+# ---------------- Enhanced CNN-EQIC EDA with Dynamic Clustering, Forecasting & Export ----------------
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -51,7 +51,7 @@ class HybridNeuralUnit:
         self.usage_count = 0
         self.last_spike_time = None
         self.decay_rate = decay_rate
-        self.connections = []  # Inter-unit links
+        self.connections = []
 
     def distance(self, input_pattern):
         diff = np.abs(input_pattern - self.position)
@@ -86,20 +86,16 @@ class HybridNeuralNetwork:
     def process_input(self, input_pattern):
         if not self.units:
             return self.generate_unit(input_pattern), 0.0
-
         similarities = [(unit, unit.distance(input_pattern)) for unit in self.units]
         similarities.sort(key=lambda x: x[1], reverse=True)
         best_unit, best_similarity = similarities[0]
-
         self.episodic_memory.store_pattern(input_pattern, best_similarity)
         self.working_memory.store(input_pattern, datetime.now())
         best_unit.age = 0
         best_unit.usage_count += 1
         best_unit.update_spike_time()
-
         if best_similarity < 0.6:
             return self.generate_unit(input_pattern), best_similarity
-
         return best_unit, best_similarity
 
 # ---------------- Forecasting ----------------
@@ -113,7 +109,7 @@ def forecast_next(values, steps=1):
 
 # ---------------- Streamlit UI ----------------
 st.set_page_config(page_title="Advanced CNN-EQIC EDA", layout="wide")
-st.title("📊 CNN-EQIC: Dynamic Clustering + Forecasting + Anomaly Detection")
+st.title("\U0001F4CA CNN-EQIC: Dynamic Clustering + Forecasting + Anomaly Detection")
 
 uploaded_file = st.file_uploader("Upload a CSV or Excel file", type=["csv", "xlsx"])
 
@@ -129,11 +125,7 @@ if uploaded_file:
     clean = SimpleImputer().fit_transform(df[selected])
     scaled = MinMaxScaler().fit_transform(clean)
 
-    st.markdown("### Tuning & Dynamic Network Clustering")
-    param_grid = [
-        {'working_memory_capacity': c, 'decay_rate': d}
-        for c in [10, 20] for d in [50.0, 100.0]
-    ]
+    param_grid = [{'working_memory_capacity': c, 'decay_rate': d} for c in [10, 20] for d in [50.0, 100.0]]
     def evaluate(net, data):
         scores = []
         for i in range(window_size, len(data)):
@@ -142,8 +134,7 @@ if uploaded_file:
             scores.append(sim)
         return np.mean(scores)
 
-    best_score = -np.inf
-    best_params = {}
+    best_score, best_params = -np.inf, {}
     for params in param_grid:
         net = HybridNeuralNetwork(**params)
         score = evaluate(net, scaled)
@@ -164,39 +155,49 @@ if uploaded_file:
     st.markdown("### CNN Unit Usage Frequency")
     st.bar_chart([u.usage_count for u in net.units])
 
-    st.markdown("### Clustering & Forecasting")
     patterns = [p for e in net.episodic_memory.episodes.values() for p in e['patterns']]
     if patterns:
         patterns = np.array(patterns)
         kmeans = KMeans(n_clusters=min(5, len(patterns))).fit(patterns)
-        st.dataframe(pd.DataFrame({'Cluster': kmeans.labels_}))
-
-        st.markdown("#### Forecasting Next 3 Steps")
+        pcs = PCA(n_components=2).fit_transform(patterns)
         forecast_values = forecast_next(similarities[-10:], 3)
-        st.write(f"Forecast: {forecast_values}")
-
-        st.markdown("#### DBSCAN Anomaly Detection")
         db = DBSCAN(eps=0.4, min_samples=5).fit(patterns)
         outliers = np.where(db.labels_ == -1)[0]
-        st.write(f"Outliers Detected: {len(outliers)}")
-        st.dataframe(pd.DataFrame(patterns[outliers], columns=[f"F{i}" for i in range(patterns.shape[1])]))
+        corr = pd.DataFrame(clean, columns=selected).corr()
+        zs = np.abs(zscore(clean))
+        out_df = pd.DataFrame(clean, columns=selected)[(zs > 3).any(axis=1)]
 
-        st.markdown("#### PCA View")
-        pcs = PCA(n_components=2).fit_transform(patterns)
+        st.markdown("### Forecast")
+        st.write(forecast_values)
+
+        st.markdown("### Cluster View")
         fig, ax = plt.subplots()
         ax.scatter(pcs[:, 0], pcs[:, 1], c=kmeans.labels_, cmap='Set1')
-        ax.set_title("Clustering Centroid Projection")
         st.pyplot(fig)
 
-        st.markdown("#### Correlation Matrix")
+        st.markdown("### Correlation Matrix")
         fig, ax = plt.subplots()
-        sns.heatmap(pd.DataFrame(clean, columns=selected).corr(), annot=True, cmap="coolwarm", ax=ax)
+        sns.heatmap(corr, annot=True, cmap="coolwarm", ax=ax)
         st.pyplot(fig)
 
-        st.markdown("#### Z-score Outlier Detection")
-        zs = np.abs(zscore(clean))
-        out_df = pd.DataFrame(clean)[(zs > 3).any(axis=1)]
-        st.write(f"Outliers: {len(out_df)}")
+        st.markdown("### Outliers")
         st.dataframe(out_df)
+
+        # --- Save to Excel ---
+        save_path = "C:\\Users\\oliva\\OneDrive\\Documents\\Excel doc\\CNNanalysis.xlsx"
+        with pd.ExcelWriter(save_path) as writer:
+            pd.DataFrame(clean, columns=selected).to_excel(writer, sheet_name='Clean Data')
+            pd.DataFrame({'Similarity': similarities}, index=timestamps).to_excel(writer, sheet_name='Similarity')
+            pd.DataFrame([u.usage_count for u in net.units], columns=['Usage']).to_excel(writer, sheet_name='Usage')
+            pd.DataFrame(pcs, columns=['PC1', 'PC2']).to_excel(writer, sheet_name='PCA')
+            pd.DataFrame({'Cluster': kmeans.labels_}).to_excel(writer, sheet_name='Clusters')
+            pd.DataFrame(patterns).to_excel(writer, sheet_name='Patterns')
+            pd.DataFrame(forecast_values, columns=['Forecast']).to_excel(writer, sheet_name='Forecast')
+            pd.DataFrame(patterns[outliers]).to_excel(writer, sheet_name='Anomalies')
+            corr.to_excel(writer, sheet_name='Correlation')
+            out_df.to_excel(writer, sheet_name='Zscore Outliers')
+
+        st.success(f"Excel exported to: {save_path}")
     else:
         st.warning("No patterns stored in memory.")
+
