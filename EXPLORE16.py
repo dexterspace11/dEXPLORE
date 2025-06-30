@@ -218,6 +218,8 @@ def save_to_excel(path, df_original, selected_features, patterns_df,
 
     wb.save(path)
 
+# ... [Keep all your imports and class definitions as-is] ...
+
 # ---------------- Streamlit UI ----------------
 st.set_page_config(page_title="Enhanced CNN-EQIC Cluster App", layout="wide")
 st.title("🔍 Hybrid CNN-EQIC Clustering Explorer")
@@ -232,6 +234,10 @@ if uploaded_file:
     numerical_cols = df.select_dtypes(include=[np.number]).columns.tolist()
     selected = st.multiselect("Select features", numerical_cols, default=numerical_cols[:4])
     window_size = st.slider("Window Size", 2, 20, 5)
+
+    # NEW: User inputs for clustering parameters
+    n_clusters = st.number_input("Number of Clusters for KMeans", min_value=2, max_value=20, value=5, step=1)
+    dbscan_eps = st.slider("DBSCAN Epsilon (Neighborhood Radius)", 0.1, 1.0, 0.4, 0.05)
 
     clean = SimpleImputer().fit_transform(df[selected])
     scaled = MinMaxScaler().fit_transform(clean)
@@ -276,15 +282,17 @@ if uploaded_file:
 
         # Evaluate clustering metrics on PCA projection
         cnn_metrics = evaluate_clustering(pcs, cnn_labels)
-        kmeans = KMeans(n_clusters=5).fit(patterns)
+        kmeans = KMeans(n_clusters=n_clusters, random_state=42).fit(patterns)
         kmeans_metrics = evaluate_clustering(pcs, kmeans.labels_)
-        db = DBSCAN(eps=0.4, min_samples=5).fit(patterns)
+        db = DBSCAN(eps=dbscan_eps, min_samples=5).fit(patterns)
         dbscan_metrics = evaluate_clustering(pcs, db.labels_)
 
         # Summary dataframe for display
         summary_df = pd.DataFrame({
             'Algorithm': ['CNN-EQIC', 'KMeans', 'DBSCAN'],
-            'Clusters': [len(np.unique(cnn_labels)), len(np.unique(kmeans.labels_)), len(np.unique(db.labels_)) - (1 if -1 in db.labels_ else 0)],
+            'Clusters': [len(np.unique(cnn_labels)),
+                         len(np.unique(kmeans.labels_)),
+                         len(np.unique(db.labels_)) - (1 if -1 in db.labels_ else 0)],
             'Outliers': [0, 0, sum(db.labels_ == -1)],
             'Silhouette': [cnn_metrics['Silhouette'], kmeans_metrics['Silhouette'], dbscan_metrics['Silhouette']],
             'Davies-Bouldin': [cnn_metrics['Davies-Bouldin'], kmeans_metrics['Davies-Bouldin'], dbscan_metrics['Davies-Bouldin']],
@@ -298,9 +306,9 @@ if uploaded_file:
         ax[0].scatter(pcs[:, 0], pcs[:, 1], c=cnn_labels, cmap='tab20', s=20)
         ax[0].set_title("CNN-EQIC Clusters")
         ax[1].scatter(pcs[:, 0], pcs[:, 1], c=kmeans.labels_, cmap='Set2', s=20)
-        ax[1].set_title("KMeans Clusters")
+        ax[1].set_title(f"KMeans Clusters (k={n_clusters})")
         ax[2].scatter(pcs[:, 0], pcs[:, 1], c=db.labels_, cmap='coolwarm', s=20)
-        ax[2].set_title("DBSCAN Clusters")
+        ax[2].set_title(f"DBSCAN Clusters (eps={dbscan_eps:.2f})")
         st.pyplot(fig)
 
         # Build cluster summary (mean feature values) and cluster-wise correlation matrices
