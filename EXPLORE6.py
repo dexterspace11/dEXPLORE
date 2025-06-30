@@ -114,7 +114,10 @@ if uploaded_file:
         window_size = st.slider("Input Window Size", 2, 20, 5)
 
         imputer = SimpleImputer(strategy='mean')
-        scaled_data = MinMaxScaler().fit_transform(imputer.fit_transform(df[selected_features]))
+        clean_data = imputer.fit_transform(df[selected_features])
+        scaled_data = MinMaxScaler().fit_transform(clean_data)
+
+        df_clean = pd.DataFrame(clean_data, columns=selected_features)
 
         network = HybridNeuralNetwork()
         similarities, timestamps = [], []
@@ -157,7 +160,7 @@ if uploaded_file:
             st.pyplot(fig3)
 
             st.markdown("### Correlation Matrix Among Selected Features")
-            corr_matrix = pd.DataFrame(df[selected_features]).corr()
+            corr_matrix = df_clean.corr()
             fig4, ax4 = plt.subplots()
             sns.heatmap(corr_matrix, annot=True, cmap="coolwarm", ax=ax4)
             ax4.set_title("Correlation Matrix")
@@ -165,9 +168,12 @@ if uploaded_file:
             st.dataframe(corr_matrix)
 
             st.markdown("### Mutual Information Scores (Nonlinear Relationships)")
-            mi_scores = mutual_info_regression(df[selected_features], df[selected_features].iloc[:, 0])
-            mi_df = pd.DataFrame({'Feature': selected_features, 'MI Score vs ' + selected_features[0]: mi_scores})
-            st.dataframe(mi_df)
+            try:
+                mi_scores = mutual_info_regression(df_clean, df_clean.iloc[:, 0])
+                mi_df = pd.DataFrame({'Feature': selected_features, 'MI Score vs ' + selected_features[0]: mi_scores})
+                st.dataframe(mi_df)
+            except ValueError as e:
+                st.warning(f"Mutual Information could not be computed: {e}")
 
             st.markdown("### PCA Insights (Top 2 Components)")
             pca = PCA(n_components=2)
@@ -180,9 +186,9 @@ if uploaded_file:
             st.dataframe(pca_df.head())
 
             st.markdown("### Outlier Detection using Z-score")
-            z_scores = np.abs(zscore(df[selected_features]))
+            z_scores = np.abs(zscore(df_clean))
             outlier_flags = (z_scores > 3).any(axis=1)
-            outliers_df = df[outlier_flags]
+            outliers_df = df_clean[outlier_flags]
             st.dataframe(outliers_df)
             st.markdown(f"**Detected {outliers_df.shape[0]} outliers.**")
 
@@ -197,7 +203,8 @@ if uploaded_file:
             with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
                 df.to_excel(writer, index=False, sheet_name='Raw Data')
                 corr_matrix.to_excel(writer, sheet_name='Correlation')
-                mi_df.to_excel(writer, sheet_name='Mutual Info')
+                if 'mi_df' in locals():
+                    mi_df.to_excel(writer, sheet_name='Mutual Info')
                 cluster_df.to_excel(writer, sheet_name='Clusters')
                 pca_df.to_excel(writer, sheet_name='PCA')
                 outliers_df.to_excel(writer, sheet_name='Outliers')
