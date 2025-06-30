@@ -127,6 +127,97 @@ def evaluate_clustering(X, labels):
     except:
         return {'Silhouette': np.nan, 'Davies-Bouldin': np.nan, 'Calinski-Harabasz': np.nan}
 
+# ---------------- Excel Export ----------------
+def save_to_excel(path, df_original, selected_features, patterns_df,
+                  cnn_labels, kmeans_labels, dbscan_labels,
+                  cnn_metrics, kmeans_metrics, dbscan_metrics,
+                  cluster_summaries, cluster_corrs, narrative_report):
+
+    wb = openpyxl.Workbook()
+
+    # Sheet1: Raw Data (selected features)
+    ws1 = wb.active
+    ws1.title = "Selected Features"
+    for r in dataframe_to_rows(df_original[selected_features], index=False, header=True):
+        ws1.append(r)
+    for cell in ws1[1]:
+        cell.font = Font(bold=True)
+        cell.alignment = Alignment(horizontal='center')
+    ws1.auto_filter.ref = ws1.dimensions
+    for col_cells in ws1.columns:
+        length = max(len(str(cell.value)) for cell in col_cells)
+        ws1.column_dimensions[col_cells[0].column_letter].width = length + 2
+
+    # Sheet2: Cluster Labels Summary
+    ws2 = wb.create_sheet("Cluster Summary")
+    summary_data = {
+        'Algorithm': ['CNN-EQIC', 'KMeans', 'DBSCAN'],
+        'Clusters': [len(np.unique(cnn_labels)), len(np.unique(kmeans_labels)), len(np.unique(dbscan_labels)) - (1 if -1 in dbscan_labels else 0)],
+        'Outliers': [0, 0, sum(dbscan_labels == -1)],
+        'Silhouette': [cnn_metrics['Silhouette'], kmeans_metrics['Silhouette'], dbscan_metrics['Silhouette']],
+        'Davies-Bouldin': [cnn_metrics['Davies-Bouldin'], kmeans_metrics['Davies-Bouldin'], dbscan_metrics['Davies-Bouldin']],
+        'Calinski-Harabasz': [cnn_metrics['Calinski-Harabasz'], kmeans_metrics['Calinski-Harabasz'], dbscan_metrics['Calinski-Harabasz']]
+    }
+    summary_df = pd.DataFrame(summary_data)
+    for r in dataframe_to_rows(summary_df, index=False, header=True):
+        ws2.append(r)
+    for cell in ws2[1]:
+        cell.font = Font(bold=True)
+        cell.alignment = Alignment(horizontal='center')
+    ws2.auto_filter.ref = ws2.dimensions
+    for col_cells in ws2.columns:
+        length = max(len(str(cell.value)) for cell in col_cells)
+        ws2.column_dimensions[col_cells[0].column_letter].width = length + 2
+
+    # Sheet3: Feature Importance by Cluster (Table format)
+    ws3 = wb.create_sheet("Feature Importance")
+
+    # CNN-EQIC Feature Importance
+    ws3.append(["CNN-EQIC Feature Importance"])
+    for label, dfc in cluster_summaries['CNN'].items():
+        ws3.append([f"Unit {label} Mean Feature Values"])
+        fi_df = dfc.round(4)
+        ws3.append(list(fi_df.columns))
+        ws3.append(list(fi_df.values[0]))
+        ws3.append([])
+
+    # KMeans Feature Importance
+    ws3.append(["KMeans Feature Importance"])
+    for label, dfc in cluster_summaries['KMeans'].items():
+        ws3.append([f"Cluster {label} Mean Feature Values"])
+        fi_df = dfc.round(4)
+        ws3.append(list(fi_df.columns))
+        ws3.append(list(fi_df.values[0]))
+        ws3.append([])
+
+    # DBSCAN Feature Importance (ignore noise -1)
+    ws3.append(["DBSCAN Feature Importance"])
+    for label, dfc in cluster_summaries['DBSCAN'].items():
+        ws3.append([f"Cluster {label} Mean Feature Values"])
+        fi_df = dfc.round(4)
+        ws3.append(list(fi_df.columns))
+        ws3.append(list(fi_df.values[0]))
+        ws3.append([])
+
+    # Sheet4+: Cluster-wise Correlations
+    for method in cluster_corrs.keys():
+        ws = wb.create_sheet(f"{method} Corr")
+        ws.append([f"{method} Cluster-wise Correlations"])
+        for label, corr_df in cluster_corrs[method].items():
+            ws.append([f"Cluster {label} Correlation Matrix"])
+            for r in dataframe_to_rows(corr_df.round(4), index=True, header=True):
+                ws.append(r)
+            ws.append([])
+
+    # Sheet last: Narrative Report
+    wsn = wb.create_sheet("Narrative Report")
+    for line in narrative_report:
+        wsn.append([line])
+    wsn.column_dimensions['A'].width = 120
+    wsn["A1"].font = Font(bold=True, size=14)
+
+    wb.save(path)
+
 # ---------------- Streamlit UI ----------------
 st.set_page_config(page_title="Enhanced CNN-EQIC Cluster App", layout="wide")
 st.title("🔍 Hybrid CNN-EQIC Clustering Explorer")
@@ -177,27 +268,34 @@ if uploaded_file:
         patterns = np.array(patterns)
         pcs = PCA(n_components=2).fit_transform(patterns)
 
-        st.markdown("### Neural Cluster Summary")
-        cnn_labels = [i for i in range(len(net.units)) for _ in range(net.units[i].usage_count)]
-        cnn_metrics = evaluate_clustering(pcs, cnn_labels[:len(pcs)])
+        # CNN Labels (assign pattern to unit index repeated by usage_count, trim or pad to patterns length)
+        cnn_labels = []
+        for i, unit in enumerate(net.units):
+            cnn_labels.extend([i] * unit.usage_count)
+        cnn_labels = cnn_labels[:len(patterns)]
+
+        # Evaluate clustering metrics on PCA projection
+        cnn_metrics = evaluate_clustering(pcs, cnn_labels)
         kmeans = KMeans(n_clusters=5).fit(patterns)
         kmeans_metrics = evaluate_clustering(pcs, kmeans.labels_)
         db = DBSCAN(eps=0.4, min_samples=5).fit(patterns)
         dbscan_metrics = evaluate_clustering(pcs, db.labels_)
 
+        # Summary dataframe for display
         summary_df = pd.DataFrame({
             'Algorithm': ['CNN-EQIC', 'KMeans', 'DBSCAN'],
-            'Clusters': [len(net.units), len(np.unique(kmeans.labels_)), len(np.unique(db.labels_)) - (1 if -1 in db.labels_ else 0)],
+            'Clusters': [len(np.unique(cnn_labels)), len(np.unique(kmeans.labels_)), len(np.unique(db.labels_)) - (1 if -1 in db.labels_ else 0)],
             'Outliers': [0, 0, sum(db.labels_ == -1)],
             'Silhouette': [cnn_metrics['Silhouette'], kmeans_metrics['Silhouette'], dbscan_metrics['Silhouette']],
             'Davies-Bouldin': [cnn_metrics['Davies-Bouldin'], kmeans_metrics['Davies-Bouldin'], dbscan_metrics['Davies-Bouldin']],
             'Calinski-Harabasz': [cnn_metrics['Calinski-Harabasz'], kmeans_metrics['Calinski-Harabasz'], dbscan_metrics['Calinski-Harabasz']]
         })
+        st.markdown("### Neural Cluster Summary & Metrics")
         st.dataframe(summary_df)
 
-        st.markdown("### PCA Projections")
+        st.markdown("### PCA Cluster Projections")
         fig, ax = plt.subplots(1, 3, figsize=(18, 5))
-        ax[0].scatter(pcs[:, 0], pcs[:, 1], c=cnn_labels[:len(pcs)], cmap='tab20', s=20)
+        ax[0].scatter(pcs[:, 0], pcs[:, 1], c=cnn_labels, cmap='tab20', s=20)
         ax[0].set_title("CNN-EQIC Clusters")
         ax[1].scatter(pcs[:, 0], pcs[:, 1], c=kmeans.labels_, cmap='Set2', s=20)
         ax[1].set_title("KMeans Clusters")
@@ -205,25 +303,55 @@ if uploaded_file:
         ax[2].set_title("DBSCAN Clusters")
         st.pyplot(fig)
 
-        st.markdown("### Feature Relationships by Cluster")
-        patterns_df = pd.DataFrame(patterns)
+        # Build cluster summary (mean feature values) and cluster-wise correlation matrices
+        cluster_summaries = {'CNN': {}, 'KMeans': {}, 'DBSCAN': {}}
+        cluster_corrs = {'CNN': {}, 'KMeans': {}, 'DBSCAN': {}}
+
+        patterns_df = pd.DataFrame(patterns, columns=[f"F{i}" for i in range(patterns.shape[1])])
+        # Add cluster labels
+        patterns_df['CNN_Label'] = cnn_labels
         patterns_df['KMeans_Label'] = kmeans.labels_
         patterns_df['DBSCAN_Label'] = db.labels_
-        patterns_df['CNN_Label'] = cnn_labels[:len(patterns)]
 
-        st.markdown("#### KMeans Feature Importance")
-        for label in np.unique(kmeans.labels_):
-            st.write(f"Cluster {label} Mean Profile")
-            st.bar_chart(patterns_df[patterns_df['KMeans_Label'] == label].mean())
+        # Calculate mean feature values & correlations per cluster
+        for method, labels in [('CNN', cnn_labels), ('KMeans', kmeans.labels_), ('DBSCAN', db.labels_)]:
+            unique_labels = np.unique(labels)
+            # Ignore DBSCAN noise -1 for summaries
+            if method == 'DBSCAN':
+                unique_labels = unique_labels[unique_labels != -1]
+            for label in unique_labels:
+                cluster_data = patterns_df[patterns_df[f'{method}_Label'] == label].drop(columns=[col for col in patterns_df.columns if 'Label' in col])
+                cluster_summaries[method][label] = cluster_data.mean()
+                cluster_corrs[method][label] = cluster_data.corr()
 
-        st.markdown("#### CNN-EQIC Feature Importance")
-        for label in np.unique(cnn_labels[:len(patterns)]):
-            st.write(f"CNN Unit {label} Mean Profile")
-            st.bar_chart(patterns_df[patterns_df['CNN_Label'] == label].mean())
+        # Display Feature Importance Tables for CNN clusters (most requested)
+        st.markdown("### CNN-EQIC Feature Importance Summary (Mean Feature Values per Cluster)")
+        cnn_fi_df = pd.DataFrame(cluster_summaries['CNN']).T
+        st.dataframe(cnn_fi_df.style.format("{:.4f}"))
 
-        st.markdown("### Correlation Heatmap (All Data)")
-        fig, ax = plt.subplots()
-        sns.heatmap(pd.DataFrame(clean, columns=selected).corr(), annot=True, cmap='coolwarm', ax=ax)
-        st.pyplot(fig)
+        # Narrative reporting example for clusters
+        narrative_report = []
+        narrative_report.append("Hybrid CNN-EQIC Clustering Narrative Report\n")
+        for method in ['CNN', 'KMeans', 'DBSCAN']:
+            narrative_report.append(f"Algorithm: {method}")
+            for label, mean_vals in cluster_summaries[method].items():
+                narrative_report.append(f" Cluster {label}:")
+                narrative_report.append(f"  - Number of points: {len(patterns_df[patterns_df[f'{method}_Label']==label])}")
+                narrative_report.append(f"  - Mean feature values:")
+                for feat, val in mean_vals.items():
+                    narrative_report.append(f"     {feat}: {val:.4f}")
+                narrative_report.append("")
+
+        # Export button & logic
+        save_path = r"C:\Users\oliva\OneDrive\Documents\Excel doc\CNN_EQIC_Cluster_Analysis.xlsx"
+        if st.button("Export Cluster Analysis Results to Excel"):
+            save_to_excel(save_path, df, selected, patterns_df,
+                          cnn_labels, kmeans.labels_, db.labels_,
+                          cnn_metrics, kmeans_metrics, dbscan_metrics,
+                          cluster_summaries, cluster_corrs,
+                          narrative_report)
+            st.success(f"Results exported to {save_path}")
+
     else:
         st.warning("No patterns found in episodic memory.")
+
