@@ -1,4 +1,4 @@
-# ----------------- Modified CNN-EQIC Clustering Focus + KMeans/DBSCAN Comparison with Excel Export ------------------
+# ------------------- Full Updated CNN-EQIC Cluster-Focused Streamlit App -------------------
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -8,7 +8,6 @@ from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.decomposition import PCA
 from sklearn.cluster import KMeans, DBSCAN
-from scipy.stats import zscore
 from datetime import datetime
 import openpyxl
 from openpyxl.utils.dataframe import dataframe_to_rows
@@ -103,10 +102,9 @@ class HybridNeuralNetwork:
         return best_unit, best_similarity
 
 # ---------------- Excel Export ----------------
-def export_cluster_results(save_path, df, selected, usage_counts, unit_assignments, pcs, kmeans_labels, dbscan_labels, cluster_summary):
+def save_to_excel(save_path, df, selected, cnn_labels, kmeans_labels, dbscan_labels, pcs):
     wb = openpyxl.Workbook()
 
-    # Sheet 1: Clean Data
     ws1 = wb.active
     ws1.title = "Clean Data"
     for r in dataframe_to_rows(df[selected], index=False, header=True):
@@ -115,107 +113,107 @@ def export_cluster_results(save_path, df, selected, usage_counts, unit_assignmen
         cell.font = Font(bold=True)
         cell.alignment = Alignment(horizontal='center')
 
-    # Sheet 2: CNN-EQIC Unit Usage
-    ws2 = wb.create_sheet("CNN Unit Usage")
-    for i, count in enumerate(usage_counts):
-        ws2.append([f"Unit {i}", count])
+    ws2 = wb.create_sheet("Clustering Labels")
+    cluster_df = pd.DataFrame({
+        "Pattern Index": range(len(cnn_labels)),
+        "CNN-EQIC Cluster": cnn_labels,
+        "KMeans Cluster": kmeans_labels,
+        "DBSCAN Cluster": dbscan_labels
+    })
+    for r in dataframe_to_rows(cluster_df, index=False, header=True):
+        ws2.append(r)
 
-    # Sheet 3: Cluster Assignments
-    ws3 = wb.create_sheet("Cluster Assignments")
-    for i, unit in enumerate(unit_assignments):
-        ws3.append([i, unit])
+    ws3 = wb.create_sheet("PCA Projection")
+    pcs_df = pd.DataFrame(pcs, columns=['PC1', 'PC2'])
+    for r in dataframe_to_rows(pcs_df, index=False, header=True):
+        ws3.append(r)
 
-    # Sheet 4: PCA Projection
-    ws4 = wb.create_sheet("PCA Projection")
-    ws4.append(['PC1', 'PC2', 'CNN Unit', 'KMeans Label', 'DBSCAN Label'])
-    for i in range(len(pcs)):
-        row = list(pcs[i]) + [unit_assignments[i], kmeans_labels[i], dbscan_labels[i]]
-        ws4.append(row)
-
-    # Sheet 5: Cluster Averages
-    ws5 = wb.create_sheet("CNN Cluster Averages")
-    for r in dataframe_to_rows(cluster_summary, index=True, header=True):
-        ws5.append(r)
-
-    # Sheet 6: Summary
-    ws6 = wb.create_sheet("Summary")
-    ws6.append(["Total Patterns", len(unit_assignments)])
-    ws6.append(["CNN Units", len(usage_counts)])
-    ws6.append(["KMeans Clusters", len(set(kmeans_labels))])
-    ws6.append(["DBSCAN Outliers", sum(np.array(dbscan_labels) == -1)])
+    ws4 = wb.create_sheet("Summary")
+    ws4.append(["Total Patterns", len(cnn_labels)])
+    ws4.append(["CNN-EQIC Clusters", len(set(cnn_labels))])
+    ws4.append(["KMeans Clusters", len(set(kmeans_labels))])
+    ws4.append(["DBSCAN Clusters (non-outlier)", len(set(dbscan_labels)) - (1 if -1 in dbscan_labels else 0)])
+    ws4.append(["DBSCAN Outliers", sum(np.array(dbscan_labels) == -1)])
 
     wb.save(save_path)
 
 # ---------------- Streamlit UI ----------------
-st.set_page_config(page_title="CNN-EQIC Clustering Engine", layout="wide")
-st.title("🧠 CNN-EQIC: Memory-Based Cluster Analysis & Comparison")
+st.set_page_config(page_title="CNN-EQIC Clustering Focus", layout="wide")
+st.title("📊 CNN-EQIC Cluster Analysis vs KMeans/DBSCAN")
 
-uploaded_file = st.file_uploader("Upload a CSV or Excel file", type=["csv", "xlsx"])
+uploaded_file = st.file_uploader("Upload CSV or Excel", type=["csv", "xlsx"])
 
 if uploaded_file:
     df = pd.read_csv(uploaded_file) if uploaded_file.name.endswith(".csv") else pd.read_excel(uploaded_file)
-    st.markdown("### Preview")
+    st.write("### Data Preview")
     st.dataframe(df.head())
 
-    numerical_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-    selected = st.multiselect("Select features", numerical_cols, default=numerical_cols[:4])
+    num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    selected = st.multiselect("Select Features", num_cols, default=num_cols[:4])
     window_size = st.slider("Window Size", 2, 20, 5)
 
     clean = SimpleImputer().fit_transform(df[selected])
     scaled = MinMaxScaler().fit_transform(clean)
 
-    st.markdown("### Running CNN-EQIC Neural Clustering")
-    net = HybridNeuralNetwork(working_memory_capacity=20, decay_rate=100.0)
-    similarities, unit_assignments = [], []
+    param_grid = [{'working_memory_capacity': c, 'decay_rate': d} for c in [10, 20] for d in [50.0, 100.0]]
 
+    def evaluate(net, data):
+        scores = []
+        for i in range(window_size, len(data)):
+            pattern = data[i - window_size:i].flatten()
+            _, sim = net.process_input(pattern)
+            scores.append(sim)
+        return np.mean(scores)
+
+    best_score = -np.inf
+    best_params = {}
+    for params in param_grid:
+        net = HybridNeuralNetwork(**params)
+        score = evaluate(net, scaled)
+        if score > best_score:
+            best_params, best_score = params, score
+
+    st.success(f"Best Params: {best_params}, Similarity Score: {best_score:.4f}")
+
+    net = HybridNeuralNetwork(**best_params)
     for i in range(window_size, len(scaled)):
         pattern = scaled[i - window_size:i].flatten()
-        unit, sim = net.process_input(pattern)
-        similarities.append(sim)
-        unit_assignments.append(net.units.index(unit))
+        net.process_input(pattern)
 
     patterns = [p for e in net.episodic_memory.episodes.values() for p in e['patterns']]
-    pcs = PCA(n_components=2).fit_transform(patterns)
+    if patterns:
+        patterns = np.array(patterns)
+        cnn_labels = [net.units.index(net.process_input(p)[0]) for p in patterns]
 
-    st.markdown("### CNN-EQIC Cluster Centroid Visualization")
-    fig, ax = plt.subplots()
-    scatter = ax.scatter(pcs[:, 0], pcs[:, 1], c=unit_assignments, cmap='tab10')
-    ax.set_title("CNN-EQIC Neural Cluster Projection (PCA)")
-    st.pyplot(fig)
+        min_len = min(len(patterns), len(cnn_labels))
+        patterns = patterns[:min_len]
+        cnn_labels = cnn_labels[:min_len]
 
-    st.markdown("### Neural Unit Usage Frequency")
-    usage_counts = [u.usage_count for u in net.units]
-    st.bar_chart(usage_counts)
+        kmeans = KMeans(n_clusters=min(5, len(patterns)), n_init='auto').fit(patterns)
+        db = DBSCAN(eps=0.4, min_samples=5).fit(patterns)
 
-    st.markdown("### CNN-EQIC Cluster Profiles")
-    cluster_df = pd.DataFrame(patterns)
-    cluster_df['Unit'] = unit_assignments
-    cluster_summary = cluster_df.groupby('Unit').mean()
-    st.dataframe(cluster_summary)
+        kmeans_labels = kmeans.labels_[:min_len]
+        dbscan_labels = db.labels_[:min_len]
 
-    st.markdown("### KMeans & DBSCAN Comparison")
-    kmeans = KMeans(n_clusters=min(5, len(patterns))).fit(patterns)
-    db = DBSCAN(eps=0.4, min_samples=5).fit(patterns)
+        pcs = PCA(n_components=2).fit_transform(patterns)
 
-    fig2, ax2 = plt.subplots(1, 2, figsize=(12, 5))
-    ax2[0].scatter(pcs[:, 0], pcs[:, 1], c=kmeans.labels_, cmap='Set1')
-    ax2[0].set_title("KMeans Clusters")
-    ax2[1].scatter(pcs[:, 0], pcs[:, 1], c=db.labels_, cmap='Spectral')
-    ax2[1].set_title("DBSCAN Clusters")
-    st.pyplot(fig2)
+        st.markdown("#### PCA View: CNN-EQIC Clusters")
+        fig, ax = plt.subplots()
+        ax.scatter(pcs[:, 0], pcs[:, 1], c=cnn_labels, cmap='Set2')
+        ax.set_title("CNN-EQIC Neural Units as Clusters")
+        st.pyplot(fig)
 
-    st.markdown("### Export Analysis to Excel")
-    export_path = "C:/Users/oliva/OneDrive/Documents/Excel doc/CNN_EQIC_Clusters.xlsx"
-    if st.button("Export to Excel"):
-        export_cluster_results(
-            export_path,
-            df=df,
-            selected=selected,
-            usage_counts=usage_counts,
-            unit_assignments=unit_assignments,
-            pcs=pcs,
-            kmeans_labels=kmeans.labels_,
-            dbscan_labels=db.labels_,
-            cluster_summary=cluster_summary
-        )
-        st.success(f"Exported to {export_path}")
+        st.markdown("#### PCA View: KMeans vs DBSCAN")
+        fig, axs = plt.subplots(1, 2, figsize=(14, 5))
+        axs[0].scatter(pcs[:, 0], pcs[:, 1], c=kmeans_labels, cmap='tab10')
+        axs[0].set_title("KMeans Clustering")
+        axs[1].scatter(pcs[:, 0], pcs[:, 1], c=dbscan_labels, cmap='tab10')
+        axs[1].set_title("DBSCAN Clustering")
+        st.pyplot(fig)
+
+        save_path = r"C:\\Users\\oliva\\OneDrive\\Documents\\Excel doc\\CNNanalysis.xlsx"
+        if st.button("Export Cluster Results to Excel"):
+            save_to_excel(save_path, df, selected, cnn_labels, kmeans_labels, dbscan_labels, pcs)
+            st.success(f"Exported to {save_path}")
+    else:
+        st.warning("No patterns extracted for clustering.")
