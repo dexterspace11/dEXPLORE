@@ -10,6 +10,8 @@ from sklearn.decomposition import PCA
 from sklearn.cluster import KMeans
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import silhouette_score, davies_bouldin_score, calinski_harabasz_score
+from scipy.cluster.hierarchy import dendrogram, linkage
+from scipy.spatial.distance import pdist
 from datetime import datetime
 import openpyxl
 from openpyxl.utils.dataframe import dataframe_to_rows
@@ -155,7 +157,8 @@ if uploaded_file:
     st.dataframe(df.head())
 
     numerical_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-    selected = st.multiselect("Select features", numerical_cols, default=numerical_cols[:4] if len(numerical_cols) >= 4 else numerical_cols)
+    default_selection = numerical_cols[:min(4, len(numerical_cols))]
+    selected = st.multiselect("Select features", numerical_cols, default=default_selection)
     window_size = st.slider("Window size", 2, 20, 5)
 
     if len(selected) >= 2:
@@ -191,6 +194,20 @@ if uploaded_file:
                 pca_df['Cluster'] = labels
                 fig, ax = plt.subplots()
                 sns.scatterplot(data=pca_df, x='PC1', y='PC2', hue='Cluster', palette='tab10', ax=ax)
+                ax.set_title("PCA Projection of Clusters")
+                st.pyplot(fig)
+
+                st.subheader("Dendrogram (Hierarchical Clustering)")
+                linked = linkage(pdist(patterns), method='ward')
+                fig, ax = plt.subplots(figsize=(10, 4))
+                dendrogram(linked, orientation='top', distance_sort='descending', show_leaf_counts=False, ax=ax)
+                st.pyplot(fig)
+
+                st.subheader("Correlation Matrix")
+                fig, ax = plt.subplots(figsize=(8, 6))
+                corr = pd.DataFrame(clean, columns=selected).corr()
+                sns.heatmap(corr, annot=True, cmap='coolwarm', ax=ax)
+                ax.set_title("Correlation between Selected Features")
                 st.pyplot(fig)
 
                 cluster_descriptions = generate_cluster_descriptions(centroids, selected)
