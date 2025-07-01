@@ -155,7 +155,7 @@ if uploaded_file:
     st.dataframe(df.head())
 
     numerical_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-    selected = st.multiselect("Select features", numerical_cols, default=numerical_cols[:4])
+    selected = st.multiselect("Select features", numerical_cols, default=numerical_cols[:4] if len(numerical_cols) >= 4 else numerical_cols)
     window_size = st.slider("Window size", 2, 20, 5)
 
     if len(selected) >= 2:
@@ -170,62 +170,66 @@ if uploaded_file:
         patterns = [p for e in net.episodic_memory.episodes.values() for p in e['patterns']]
         if len(patterns) > 0:
             patterns = np.array(patterns)
-            k = st.slider("Number of clusters", 2, min(10, len(patterns)), 5)
-            kmeans = KMeans(n_clusters=k, random_state=42).fit(patterns)
-            labels = kmeans.labels_
-            centroids = kmeans.cluster_centers_
+            max_clusters = min(10, len(patterns))
+            if max_clusters < 2:
+                st.warning("Not enough patterns for clustering. Try loading more data or adjusting the window size.")
+            else:
+                k = st.slider("Number of clusters", 2, max_clusters, min(5, max_clusters))
+                kmeans = KMeans(n_clusters=k, random_state=42).fit(patterns)
+                labels = kmeans.labels_
+                centroids = kmeans.cluster_centers_
 
-            silhouette = silhouette_score(patterns, labels)
-            db = davies_bouldin_score(patterns, labels)
-            ch = calinski_harabasz_score(patterns, labels)
-            st.metric("Silhouette Score", f"{silhouette:.3f}")
-            st.metric("Davies-Bouldin Index", f"{db:.3f}")
-            st.metric("Calinski-Harabasz Score", f"{ch:.1f}")
+                silhouette = silhouette_score(patterns, labels)
+                db = davies_bouldin_score(patterns, labels)
+                ch = calinski_harabasz_score(patterns, labels)
+                st.metric("Silhouette Score", f"{silhouette:.3f}")
+                st.metric("Davies-Bouldin Index", f"{db:.3f}")
+                st.metric("Calinski-Harabasz Score", f"{ch:.1f}")
 
-            pca = PCA(n_components=2).fit_transform(patterns)
-            pca_df = pd.DataFrame(pca, columns=['PC1', 'PC2'])
-            pca_df['Cluster'] = labels
-            fig, ax = plt.subplots()
-            sns.scatterplot(data=pca_df, x='PC1', y='PC2', hue='Cluster', palette='tab10', ax=ax)
-            st.pyplot(fig)
+                pca = PCA(n_components=2).fit_transform(patterns)
+                pca_df = pd.DataFrame(pca, columns=['PC1', 'PC2'])
+                pca_df['Cluster'] = labels
+                fig, ax = plt.subplots()
+                sns.scatterplot(data=pca_df, x='PC1', y='PC2', hue='Cluster', palette='tab10', ax=ax)
+                st.pyplot(fig)
 
-            cluster_descriptions = generate_cluster_descriptions(centroids, selected)
-            comp_summary = generate_comparative_summary(centroids, selected)
+                cluster_descriptions = generate_cluster_descriptions(centroids, selected)
+                comp_summary = generate_comparative_summary(centroids, selected)
 
-            st.subheader("Narrative Cluster Descriptions")
-            for desc in cluster_descriptions:
-                st.markdown(f"- {desc}")
+                st.subheader("Narrative Cluster Descriptions")
+                for desc in cluster_descriptions:
+                    st.markdown(f"- {desc}")
 
-            st.subheader("Comparative Summary")
-            st.text(comp_summary)
+                st.subheader("Comparative Summary")
+                st.text(comp_summary)
 
-            if st.button("Export Analysis to Excel"):
-                export_path = r"C:\\Users\\oliva\\OneDrive\\Documents\\Excel doc\\DNNanalysis.xlsx"
-                wb = openpyxl.Workbook()
-                ws1 = wb.active
-                ws1.title = "Cluster Descriptions"
-                for line in cluster_descriptions:
-                    ws1.append([line])
-                ws2 = wb.create_sheet("Comparative Summary")
-                for line in comp_summary.split("\n"):
-                    ws2.append([line])
-                ws3 = wb.create_sheet("Cluster Assignments")
-                df_assign = pd.DataFrame({"Pattern Index": range(len(labels)), "Cluster": labels})
-                for r in dataframe_to_rows(df_assign, index=False, header=True):
-                    ws3.append(r)
-                ws4 = wb.create_sheet("Centroids")
-                df_centroids = pd.DataFrame(centroids, columns=selected)
-                for r in dataframe_to_rows(df_centroids, index=False, header=True):
-                    ws4.append(r)
-                for ws in wb.worksheets:
-                    for col_cells in ws.columns:
-                        col_cells = list(col_cells)
-                        if len(col_cells) == 0:
-                            continue
-                        length = max(len(str(cell.value)) if cell.value else 0 for cell in col_cells)
-                        col_letter = col_cells[0].column_letter if col_cells else 'A'
-                        ws.column_dimensions[col_letter].width = length + 2
-                wb.save(export_path)
-                st.success(f"Exported to {export_path}")
+                if st.button("Export Analysis to Excel"):
+                    export_path = r"C:\\Users\\oliva\\OneDrive\\Documents\\Excel doc\\DNNanalysis.xlsx"
+                    wb = openpyxl.Workbook()
+                    ws1 = wb.active
+                    ws1.title = "Cluster Descriptions"
+                    for line in cluster_descriptions:
+                        ws1.append([line])
+                    ws2 = wb.create_sheet("Comparative Summary")
+                    for line in comp_summary.split("\n"):
+                        ws2.append([line])
+                    ws3 = wb.create_sheet("Cluster Assignments")
+                    df_assign = pd.DataFrame({"Pattern Index": range(len(labels)), "Cluster": labels})
+                    for r in dataframe_to_rows(df_assign, index=False, header=True):
+                        ws3.append(r)
+                    ws4 = wb.create_sheet("Centroids")
+                    df_centroids = pd.DataFrame(centroids, columns=selected)
+                    for r in dataframe_to_rows(df_centroids, index=False, header=True):
+                        ws4.append(r)
+                    for ws in wb.worksheets:
+                        for col_cells in ws.columns:
+                            col_cells = list(col_cells)
+                            if len(col_cells) == 0:
+                                continue
+                            length = max(len(str(cell.value)) if cell.value else 0 for cell in col_cells)
+                            col_letter = col_cells[0].column_letter if col_cells else 'A'
+                            ws.column_dimensions[col_letter].width = length + 2
+                    wb.save(export_path)
+                    st.success(f"Exported to {export_path}")
         else:
             st.warning("No patterns were learned. Try adjusting the window size or selecting different features.")
