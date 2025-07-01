@@ -219,7 +219,7 @@ if uploaded_file:
         st.markdown(f"**Summary:** {summary_text}")
 
         if st.button("Export Clustering Report"):
-            save_path = os.path.join(os.path.expanduser("~"), "Documents", "Clustering_Report.xlsx")
+            save_path = r"C:\Users\oliva\OneDrive\Documents\Excel doc\DNNanalysis.xlsx"
             export_clustering_results(save_path, best_params, silhouette, db_score, ch_score, summary_text)
             st.success(f"Report exported to {save_path}")
 
