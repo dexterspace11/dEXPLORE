@@ -221,7 +221,7 @@ if uploaded_file:
                 st.text(comp_summary)
 
                 if st.button("Export Analysis to Excel"):
-                    export_path = r"C:\\Users\\oliva\\OneDrive\\Documents\\Excel doc\\DNNanalysis.xlsx"
+                    export_path = r"C:\Users\oliva\OneDrive\Documents\Excel doc\DNNanalysis.xlsx"
                     wb = openpyxl.Workbook()
                     ws1 = wb.active
                     ws1.title = "Cluster Descriptions"
