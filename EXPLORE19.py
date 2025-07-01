@@ -3,7 +3,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
-import seaborn as sns
+import seab as sns
 from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.decomposition import PCA
@@ -223,7 +223,8 @@ if uploaded_file:
                         if len(col_cells) == 0:
                             continue
                         length = max(len(str(cell.value)) if cell.value else 0 for cell in col_cells)
-                        ws.column_dimensions[col_cells[0].column_letter].width = length + 2
+                        col_letter = col_cells[0].column_letter if col_cells else 'A'
+                        ws.column_dimensions[col_letter].width = length + 2
                 wb.save(export_path)
                 st.success(f"Exported to {export_path}")
         else:
