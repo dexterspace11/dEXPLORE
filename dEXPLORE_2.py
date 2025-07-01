@@ -14,6 +14,7 @@ from datetime import datetime
 import openpyxl
 from openpyxl.utils.dataframe import dataframe_to_rows
 from openpyxl.styles import Font, Alignment
+from scipy.cluster.hierarchy import linkage, dendrogram
 import re
 
 # ---------------- Memory Structures ----------------
