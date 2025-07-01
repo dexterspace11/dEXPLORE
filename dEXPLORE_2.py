@@ -10,11 +10,11 @@ from sklearn.decomposition import PCA
 from sklearn.cluster import KMeans
 from sklearn.linear_model import LinearRegression
 from sklearn.metrics import silhouette_score, davies_bouldin_score, calinski_harabasz_score
-from scipy.cluster.hierarchy import linkage, dendrogram
 from datetime import datetime
 import openpyxl
 from openpyxl.utils.dataframe import dataframe_to_rows
 from openpyxl.styles import Font, Alignment
+import re
 
 # ---------------- Memory Structures ----------------
 class EpisodicMemory:
@@ -113,25 +113,35 @@ def interpret_level(value):
     else:
         return "high"
 
-def generate_cluster_descriptions(centroids, feature_names):
+def group_features_by_base(centroids, feature_names):
+    grouped = {}
+    for i, name in enumerate(feature_names):
+        base = re.sub(r'_t\d+', '', name)
+        if base not in grouped:
+            grouped[base] = []
+        for j in range(len(centroids)):
+            if len(grouped[base]) <= j:
+                grouped[base].append([])
+            grouped[base][j].append(centroids[j][i])
+    return grouped
+
+def generate_cluster_descriptions_grouped(centroids, feature_names):
+    grouped = group_features_by_base(centroids, feature_names)
     descriptions = []
-    for i, centroid in enumerate(centroids):
+    for i in range(len(centroids)):
         traits = []
-        for feat_name, val in zip(feature_names, centroid):
-            level = interpret_level(val)
-            traits.append(f"{level} {feat_name}")
+        for base_feat, values in grouped.items():
+            avg_level = interpret_level(np.mean(values[i]))
+            traits.append(f"{avg_level} {base_feat}")
         trait_str = ", ".join(traits)
-        desc = f"Cluster {i} is characterized by {trait_str}. This suggests data points in this cluster have these typical feature levels."
-        descriptions.append(desc)
+        descriptions.append(f"Cluster {i} is characterized by: {trait_str}.")
     return descriptions
 
 def generate_comparative_summary(centroids, feature_names):
     feature_ranges = centroids.max(axis=0) - centroids.min(axis=0)
     important_features_idx = np.where(feature_ranges > 0.2)[0]
-
     if len(important_features_idx) == 0:
         return "Clusters show relatively similar feature profiles with minor variations."
-
     lines = ["Comparative summary of clusters:"]
     for idx in important_features_idx:
         if idx >= len(feature_names):
