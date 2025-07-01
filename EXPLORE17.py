@@ -1,4 +1,4 @@
-# ---------------- Enhanced CNN-EQIC EDA with Interactive Clustering Tuning ----------------
+# ---------------- Enhanced CNN-EQIC EDA with Professional Cluster Analysis for Research ----------------
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -116,56 +116,81 @@ def forecast_next(values, steps=1):
     return model.predict(X_pred)
 
 # ---------------- Excel Export ----------------
-def export_clustering_results(filepath, best_params, silhouette, db_score, ch_score, summary_text):
+def export_detailed_clustering(filepath, best_params, silhouette, db_score, ch_score, summary_text, patterns, kmeans_labels, pcs, centroids):
     wb = openpyxl.Workbook()
-    ws = wb.active
-    ws.title = "Clustering Report"
 
+    # Summary Sheet
+    ws1 = wb.active
+    ws1.title = "Clustering Summary"
     rows = [
-        ["Parameter", "Value"],
+        ["Metric", "Value"],
         ["Working Memory Capacity", best_params['working_memory_capacity']],
         ["Decay Rate", best_params['decay_rate']],
         ["Silhouette Score", f"{silhouette:.4f}"],
         ["Davies-Bouldin Index", f"{db_score:.4f}"],
         ["Calinski-Harabasz Score", f"{ch_score:.4f}"],
-        ["Summary", summary_text]
+        ["Summary Narrative", summary_text]
     ]
-
     for row in rows:
-        ws.append(row)
-
-    for cell in ws[1]:
+        ws1.append(row)
+    for cell in ws1[1]:
         cell.font = Font(bold=True)
         cell.alignment = Alignment(horizontal='center')
+    ws1.column_dimensions['A'].width = 30
+    ws1.column_dimensions['B'].width = 100
 
-    ws.column_dimensions['A'].width = 35
-    ws.column_dimensions['B'].width = 80
+    # Pattern Assignments
+    ws2 = wb.create_sheet("Cluster Assignments")
+    df_patterns = pd.DataFrame(patterns)
+    df_patterns['KMeans_Cluster'] = kmeans_labels
+    for r in dataframe_to_rows(df_patterns, index=False, header=True):
+        ws2.append(r)
+    for cell in ws2[1]:
+        cell.font = Font(bold=True)
+    ws2.auto_filter.ref = ws2.dimensions
+
+    # PCA Sheet
+    ws3 = wb.create_sheet("PCA Projection")
+    pcs_df = pd.DataFrame(pcs, columns=['PC1', 'PC2'])
+    pcs_df['Cluster'] = kmeans_labels
+    for r in dataframe_to_rows(pcs_df, index=False, header=True):
+        ws3.append(r)
+    for cell in ws3[1]:
+        cell.font = Font(bold=True)
+    ws3.auto_filter.ref = ws3.dimensions
+
+    # Centroid Analysis
+    ws4 = wb.create_sheet("Centroid Analysis")
+    centroid_df = pd.DataFrame(centroids, columns=[f"Feature_{i+1}" for i in range(centroids.shape[1])])
+    centroid_df['Cluster'] = range(len(centroids))
+    for r in dataframe_to_rows(centroid_df, index=False, header=True):
+        ws4.append(r)
+    for cell in ws4[1]:
+        cell.font = Font(bold=True)
+    ws4.auto_filter.ref = ws4.dimensions
 
     wb.save(filepath)
 
 # ---------------- Streamlit UI ----------------
 st.set_page_config(page_title="Advanced CNN-EQIC EDA", layout="wide")
-st.title("📊 CNN-EQIC: Interactive Clustering + Forecasting + Insights")
+st.title("📊 CNN-EQIC: Research-Ready Cluster Analysis")
 
 uploaded_file = st.file_uploader("Upload a CSV or Excel file", type=["csv", "xlsx"])
 
 if uploaded_file:
     df = pd.read_csv(uploaded_file) if uploaded_file.name.endswith(".csv") else pd.read_excel(uploaded_file)
-    st.markdown("### Data Preview")
+    st.markdown("### Dataset Preview")
     st.dataframe(df.head())
 
     numerical_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-    selected = st.multiselect("Select features", numerical_cols, default=numerical_cols[:4])
-    window_size = st.slider("Window Size for Pattern Recognition", 2, 20, 5)
+    selected = st.multiselect("Select Numerical Features for Analysis", numerical_cols, default=numerical_cols[:4])
+    window_size = st.slider("Window Size (Pattern Recognition)", 2, 20, 5)
 
     clean = SimpleImputer().fit_transform(df[selected])
     scaled = MinMaxScaler().fit_transform(clean)
 
-    st.markdown("### Neural Network Pattern Extraction")
-    param_grid = [
-        {'working_memory_capacity': c, 'decay_rate': d}
-        for c in [10, 20] for d in [50.0, 100.0]
-    ]
+    st.markdown("### Neural Network Training")
+    param_grid = [{'working_memory_capacity': c, 'decay_rate': d} for c in [10, 20] for d in [50.0, 100.0]]
     def evaluate(net, data):
         scores = []
         for i in range(window_size, len(data)):
@@ -174,15 +199,13 @@ if uploaded_file:
             scores.append(sim)
         return np.mean(scores)
 
-    best_score = -np.inf
-    best_params = {}
+    best_score, best_params = -np.inf, {}
     for params in param_grid:
         net = HybridNeuralNetwork(**params)
         score = evaluate(net, scaled)
         if score > best_score:
             best_params, best_score = params, score
-
-    st.success(f"Best Neural Network Parameters: {best_params} with Similarity Score: {best_score:.4f}")
+    st.success(f"Best Network Params: {best_params}, Similarity Score: {best_score:.4f}")
 
     net = HybridNeuralNetwork(**best_params)
     similarities, timestamps = [], []
@@ -192,52 +215,43 @@ if uploaded_file:
         similarities.append(sim)
         timestamps.append(i)
 
-    st.line_chart(pd.DataFrame({"Pattern Similarity": similarities}, index=timestamps))
-
     patterns = [p for e in net.episodic_memory.episodes.values() for p in e['patterns']]
     if patterns:
         patterns = np.array(patterns)
-
-        st.markdown("### Interactive Clustering Tuning")
-        n_clusters = st.slider("Number of Clusters (KMeans)", 2, 10, 5)
-        eps_val = st.slider("DBSCAN Epsilon", 0.1, 1.0, 0.4)
-        min_samples_val = st.slider("DBSCAN Min Samples", 2, 10, 5)
-
+        st.markdown("### KMeans Clustering")
+        n_clusters = st.slider("Select K (Clusters)", 2, 10, 5)
         kmeans = KMeans(n_clusters=n_clusters).fit(patterns)
-        dbscan = DBSCAN(eps=eps_val, min_samples=min_samples_val).fit(patterns)
+        labels = kmeans.labels_
+        centroids = kmeans.cluster_centers_
 
-        silhouette = silhouette_score(patterns, kmeans.labels_)
-        db_score = davies_bouldin_score(patterns, kmeans.labels_)
-        ch_score = calinski_harabasz_score(patterns, kmeans.labels_)
+        silhouette = silhouette_score(patterns, labels)
+        db_score = davies_bouldin_score(patterns, labels)
+        ch_score = calinski_harabasz_score(patterns, labels)
 
-        st.markdown("### Clustering Metrics")
-        st.write(f"Silhouette Score: {silhouette:.4f} (higher is better)")
-        st.write(f"Davies-Bouldin Index: {db_score:.4f} (lower is better)")
-        st.write(f"Calinski-Harabasz Score: {ch_score:.4f} (higher is better)")
+        summary_text = f"Clusters discovered show {'distinct' if silhouette > 0.5 else 'moderate'} separation. Silhouette Score: {silhouette:.2f}, DB Index: {db_score:.2f}, CH Score: {ch_score:.2f}. Each cluster groups patterns with similar trajectory/structure. Centroid analysis provides the average pattern signature per group."
 
-        summary_text = f"The model achieved a Silhouette Score of {silhouette:.2f}, indicating {'good' if silhouette > 0.5 else 'moderate'} cluster quality. The Davies-Bouldin Index of {db_score:.2f} suggests {'well-separated' if db_score < 1.0 else 'moderately overlapping'} clusters. The Calinski-Harabasz Score of {ch_score:.2f} confirms {'strong' if ch_score > 1000 else 'moderate'} cluster compactness."
-        st.markdown(f"**Summary:** {summary_text}")
+        st.markdown("#### Clustering Metrics")
+        st.code(summary_text)
 
-        if st.button("Export Clustering Report"):
-            save_path = r"C:\Users\oliva\OneDrive\Documents\Excel doc\DNNanalysis.xlsx"
-            export_clustering_results(save_path, best_params, silhouette, db_score, ch_score, summary_text)
-            st.success(f"Report exported to {save_path}")
-
-        st.markdown("#### PCA Clustering Visualization")
         pcs = PCA(n_components=2).fit_transform(patterns)
         fig, ax = plt.subplots()
-        scatter = ax.scatter(pcs[:, 0], pcs[:, 1], c=kmeans.labels_, cmap='Set1')
-        ax.set_title("KMeans Cluster Projection in 2D Space")
+        scatter = ax.scatter(pcs[:, 0], pcs[:, 1], c=labels, cmap='tab10')
+        ax.set_title("Cluster Visualization via PCA")
         st.pyplot(fig)
 
-        st.markdown("### Insights and Interpretations")
-        st.info("""
-        ✅ **Silhouette Score**: Indicates how distinct each cluster is. Values > 0.5 are good.
-        ✅ **Davies-Bouldin Index**: Lower scores indicate better separation between clusters.
-        ✅ **Calinski-Harabasz Score**: Higher values suggest well-defined clusters.
-        ✅ **DBSCAN Outliers**: May signify rare or unique patterns/anomalies.
-        ✅ **PCA Projection**: Visual clue of cluster shape and separation.
-        """)
+        st.markdown("### Export Results for Research")
+        export_path = r"C:\\Users\\oliva\\OneDrive\\Documents\\Excel doc\\DNNanalysis.xlsx"
+        if st.button("Export Detailed Excel Report"):
+            export_detailed_clustering(export_path, best_params, silhouette, db_score, ch_score, summary_text, patterns, labels, pcs, centroids)
+            st.success(f"📁 Results saved to {export_path}")
 
+        st.markdown("### Interpretive Notes")
+        st.info("""
+        - Each cluster represents a group of time-based patterns with shared statistical shape.
+        - Centroids indicate average pattern of each group, useful for behavioral interpretation.
+        - Outliers may indicate rare, novel, or transitional states.
+        - PCA shows pattern group overlap or distinctness.
+        - These clusters can be mapped to real-world segments, regimes, or transitions.
+        """)
     else:
-        st.warning("No patterns found for clustering.")
+        st.warning("Insufficient patterns detected. Adjust window size or check data range.")
